@@ -1,0 +1,7 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {backend} from './helpers/backend.mjs';
+test('home and office modes persist through punch-out and refresh',()=>{for(const workMode of ['Work from home','Work from office']){const b=backend('e@company.test');const result=b.call('attendance',{kind:'in',workMode,compact:true});assert.equal(result.ok,true);assert.equal(result.data.attendance.workMode,workMode);const out=b.call('attendance',{kind:'out',workMode:'Work from home',compact:true});assert.equal(out.ok,true);assert.equal(out.data.attendance.workMode,workMode);assert.equal(b.call('bootstrap').data.db.attendance[0].workMode,workMode);}});
+test('invalid work mode cannot create a punch',()=>{const b=backend('e@company.test');for(const workMode of ['Remote',null,42])assert.equal(b.call('attendance',{kind:'in',workMode}).ok,false);assert.equal(b.sheets.attendance.length,1);});
+test('legacy attendance sheets retain existing records when work mode is added',()=>{const b=backend('e@company.test');b.sheets.attendance[0].pop();b.sheets.attendance.push(['legacy','e','2026-10-13','2026-10-13T03:30:00Z','2026-10-13T12:30:00Z','2026-10-13T03:30:00Z']);assert.equal(b.call('bootstrap').ok,true);assert.equal(b.sheets.attendance[0].at(-1),'workMode');assert.equal(b.sheets.attendance[1][0],'legacy');assert.equal(b.call('attendance',{kind:'in',workMode:'Work from office',compact:true}).data.attendance.workMode,'Work from office');});
+

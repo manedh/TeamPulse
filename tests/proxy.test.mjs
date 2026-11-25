@@ -1,0 +1,15 @@
+﻿import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {proxyAppsScript} from '../server/apps-script-proxy.js';
+import handler from '../api/teampulse.js';
+const backendUrl='https://script.google.com/macros/s/test-deployment/exec';
+const call=options=>proxyAppsScript({method:'POST',body:{action:'bootstrap',token:'test-session'},backendUrl,...options});
+test('production proxy forwards action and session to the configured Apps Script backend',async()=>{let args;const r=await call({fetchImpl:async(...a)=>{args=a;return {ok:true,status:200,json:async()=>({ok:true,data:{db:{}}})};}});assert.equal(r.status,200);assert.equal(args[0],backendUrl);assert.equal(JSON.parse(args[1].body).token,'test-session');assert.equal(args[1].redirect,'follow');assert.equal(args[1].headers['Content-Type'],'text/plain;charset=utf-8');});
+test('proxy preserves application validation and authentication failures',async()=>{const body={ok:false,code:'UNAUTHENTICATED',error:'Expired'};const r=await call({fetchImpl:async()=>({ok:true,status:200,json:async()=>body})});assert.deepEqual(r.body,body);});
+test('GET cannot forward a backend request',async()=>assert.equal((await call({method:'GET'})).status,405));
+test('missing or untrusted backend configuration is rejected',async()=>{assert.equal((await call({backendUrl:''})).status,503);assert.equal((await call({backendUrl:'https://example.com/exec'})).status,503);});
+test('invalid JSON and oversized bodies do not reach Google',async()=>{assert.equal((await call({body:'{'})).status,400);assert.equal((await call({body:{action:'login',password:'x'.repeat(33000)}})).status,413);});
+test('Google access denial is reported precisely',async()=>{const r=await call({fetchImpl:async()=>({status:401})});assert.equal(r.status,502);assert.equal(r.body.code,'DEPLOYMENT_ACCESS_RESTRICTED');});
+test('HTML redirects and malformed API responses are rejected safely',async()=>{assert.equal((await call({fetchImpl:async()=>({ok:true,status:200,json:async()=>{throw Error('html');}})})).status,502);assert.equal((await call({fetchImpl:async()=>({ok:true,status:200,json:async()=>({wrong:true})})})).status,502);});
+test('backend timeouts return 504 without exposing request credentials',async()=>{const r=await call({fetchImpl:async()=>{const e=new Error('secret');e.name='TimeoutError';throw e;}});assert.equal(r.status,504);assert.equal(JSON.stringify(r).includes('secret'),false);});
+test('Vercel entrypoint rejects unsupported methods and disables response caching',async()=>{const headers={};let status,body;const res={setHeader:(k,v)=>headers[k]=v,status:s=>{status=s;return res;},json:b=>{body=b;}};await handler({method:'GET'},res);assert.equal(status,405);assert.equal(headers.Allow,'POST');assert.equal(headers['Cache-Control'],'no-store');assert.equal(body.ok,false);});

@@ -1,0 +1,25 @@
+import React,{useEffect,useRef,useState} from 'react';
+import {Bell,X} from 'lucide-react';
+import {mergePopupQueue} from '../utils/notificationInbox.js';
+import {request} from '../data/client.js';
+import {usePreferences} from './PreferencesProvider.jsx';
+export default function NotificationCenter({db,user,navigate}){
+ const {t,language}=usePreferences();
+ const [items,setItems]=useState([]),[unread,setUnread]=useState(0),[open,setOpen]=useState(false),[error,setError]=useState('');
+ const [popups,setPopups]=useState([]);const popup=popups[0]||null;
+ function setPopup(){setPopups(old=>old.slice(1));}
+ const cursor=useRef(null),popupRef=useRef([]);popupRef.current=popups;
+ const [nextCursor,setNextCursor]=useState(null),[olderPage,setOlderPage]=useState(false);
+ const pagePayload=()=>({cursor:cursor.current,limit:50,popupIds:popupRef.current.map(n=>n.id)});
+ const running=useRef(false),alive=useRef(true);
+ function accept(result){if(!alive.current)return;setItems(result.items);setUnread(result.unread);setNextCursor(result.nextCursor||null);setError('');setPopups(old=>mergePopupQueue(old,result));}
+ async function refresh(){if(running.current||document.visibilityState==='hidden')return;running.current=true;try{accept(await request('notificationSnapshot',pagePayload()));}catch(e){if(alive.current)setError(e.message);}finally{running.current=false;}}
+ useEffect(()=>{alive.current=true;refresh();const timer=setInterval(refresh,10000);const focus=()=>refresh();window.addEventListener('focus',focus);window.addEventListener('teampulse-notifications-refresh',focus);window.addEventListener('teampulse-messages',focus);return()=>{alive.current=false;clearInterval(timer);window.removeEventListener('focus',focus);window.removeEventListener('teampulse-notifications-refresh',focus);window.removeEventListener('teampulse-messages',focus);};},[user.id]);
+ useEffect(()=>{refresh();},[db]);
+ useEffect(()=>{if(!popup)return;const timer=setTimeout(()=>setPopup(null),7000);return()=>clearTimeout(timer);},[popup]);
+ useEffect(()=>{if(!open)return;const close=e=>{if(e.key==='Escape')setOpen(false);};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close);},[open]);
+ async function loadPage(value){if(running.current)return;cursor.current=value;setOlderPage(!!value);await refresh();}
+ async function change(action,payload){if(running.current)return;running.current=true;try{accept(await request(action,{...pagePayload(),...payload}));}catch(e){setError(e.message);}finally{running.current=false;}}
+ async function visit(item){if(running.current)return;running.current=true;try{const target=await request('notificationOpen',{id:item.id});accept(await request('notificationRead',{...pagePayload(),ids:[item.id]}));navigate(item.page,target);setOpen(false);}catch(e){setError(e.message);setOpen(true);}finally{running.current=false;}}
+ return <div className="notifications"><button aria-label={`Notifications${unread?', '+unread+' unread':''}`} aria-expanded={open} aria-controls="notification-inbox" onClick={()=>{setOpen(!open);setPopup(null);refresh();}}><Bell size={18}/>{unread>0&&<span className="notificationcount">{unread>99?'99+':unread}</span>}</button>{open&&<section id="notification-inbox" className="notificationinbox" aria-label={t('Notifications')}><div className="notificationheading"><strong>{t('Notifications')}</strong><button disabled={!unread} onClick={()=>change('notificationRead',{all:true})}>Mark all as read</button><button disabled={!items.length} onClick={()=>change('notificationDismiss',{all:true})}>Clear all</button><button aria-label="Close notifications" onClick={()=>setOpen(false)}><X size={16}/>Close</button></div>{error&&<p className="error" role="alert">{error}<button onClick={refresh}>Retry</button></p>}<div className="notificationlist">{items.length?items.map(item=><div key={item.id} className={item.read?'notificationrow':'notificationrow unread'}><button className="notificationitem" onClick={()=>visit(item)}><span>{item.message}</span><small>{t(item.page)} | {new Date(item.time).toLocaleString(language==='hi'?'hi-IN':'en-IN',{timeZone:'Asia/Kolkata'})} IST</small><small>{item.read?'Read':'Unread'}</small></button>{!item.read&&<button className="notificationclear" onClick={()=>change('notificationRead',{ids:[item.id]})}>Mark read</button>}<button className="notificationclear" aria-label={'Clear notification: '+item.message} onClick={()=>change('notificationDismiss',{ids:[item.id]})}><X size={16}/></button></div>):<p className="notificationempty">{t('No notifications.')}</p>}</div><div className="notificationheading">{olderPage&&<button onClick={()=>loadPage(null)}>Latest notifications</button>}{nextCursor&&<button onClick={()=>loadPage(nextCursor)}>Older notifications</button>}</div></section>}{popup&&!open&&<div className="notificationpopup" role="status"><button onClick={()=>visit(popup)}><Bell size={18}/><span>{popup.message}</span></button><button aria-label="Dismiss notification" onClick={()=>setPopup(null)}><X size={16}/></button></div>}</div>;
+}

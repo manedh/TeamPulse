@@ -1,0 +1,9 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import {backend} from './helpers/backend.mjs';
+import {departmentTeammates,teamDepartmentKey} from '../src/utils/team.js';
+const people=[{id:'e',department:'Software Developer'},{id:'l',department:' software engineer '},{id:'h',department:'HR'},{id:'blank',department:''}];
+test('department aliases match without leaking other or missing departments',()=>{assert.deepEqual(departmentTeammates(people,{id:'e',role:'Employee',department:'Software Developer'}).map(e=>e.id),['e','l']);assert.deepEqual(departmentTeammates(people,{id:'blank',role:'Employee',department:''}).map(e=>e.id),['blank']);for(const role of ['Admin','HR'])assert.equal(departmentTeammates(people,{id:'h',role,department:'HR'}).length,4);});
+test('server enforces department visibility for Employees and Team Leaders, while Admin/HR manage everyone',()=>{for(const [email,role] of [['e@company.test','Employee'],['l@company.test','Team Leader'],['admin@company.test','Admin'],['h@company.test','HR']]){const b=backend(email);for(const row of b.sheets.employees.slice(1))row[4]=['e','l'].includes(row[0])?'AI/ML Developer':'HR';for(const action of ['bootstrap','attendanceSnapshot']){const result=b.call(action);assert.equal(result.ok,true,result.error);const data=action==='bootstrap'?result.data.db:result.data;assert.deepEqual(Array.from(data.employeeDirectory,e=>e.id),['Admin','HR'].includes(role)?['a','h','l','e','x']:['l','e']);}}});
+test('frontend and backend department keys agree for canonical, alias, custom and empty values',()=>{const b=backend();for(const value of ['Software Engineer','AL ML','Human Resources',' software Developer ','Custom Team','','QA','Finance & Accounts']){b.ctx.department=value;assert.equal(vm.runInContext('teamDepartmentKey_(department)',b.ctx),teamDepartmentKey(value));}});

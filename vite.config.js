@@ -1,0 +1,4 @@
+﻿import {defineConfig,loadEnv} from 'vite';
+import {proxyAppsScript,readBody} from './server/apps-script-proxy.js';
+function sheetsProxy(backendUrl){return {name:'teampulse-backend',configureServer(server){server.middlewares.use('/api/teampulse',async(req,res)=>{res.setHeader('Content-Type','application/json');res.setHeader('Cache-Control','no-store');try{const result=await proxyAppsScript({method:req.method,body:req.method==='POST'?await readBody(req):null,backendUrl});res.statusCode=result.status;res.end(JSON.stringify(result.body));}catch{res.statusCode=413;res.end(JSON.stringify({ok:false,error:'Request exceeds 32 KB.'}));}});}};}
+export default defineConfig(({mode})=>{const env=loadEnv(mode,process.cwd(),'');return {plugins:[sheetsProxy(env.APPS_SCRIPT_URL)],css:{postcss:{plugins:[]}},build:{cssCodeSplit:false,rollupOptions:{output:{entryFileNames:'app.js',assetFileNames:'[name][extname]',inlineDynamicImports:true}}}};});
